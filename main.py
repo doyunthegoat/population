@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -21,7 +22,6 @@ st.caption("최신 연도 데이터를 바탕으로 지역별 남녀 연령대 �
 @st.cache_data
 def load_data():
     # GitHub 주소를 pandas가 직접 읽을 수 있는 raw URL 형태로 지정합니다.
-    # zip 압축 파일 형태의 CSV를 pandas가 자동으로 해제하여 읽어옵니다.
     url = "https://raw.githubusercontent.com/doyunthegoat/population/main/population_ts_yearly_gender.zip"
     df = pd.read_csv(url)
 
@@ -44,18 +44,15 @@ st.success(f"기준 연도: **{latest_year}년** 최신 데이터 로드 완료"
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    # 1) 시도 선택
     sido_list = sorted(df["시도"].dropna().unique())
     selected_sido = st.selectbox("1. 시·도 선택", sido_list)
 
 with col2:
-    # 2) 선택된 시도에 해당하는 시군구 목록 필터링
     df_sido = df[df["시도"] == selected_sido]
     sigungu_list = sorted(df_sido["시군구"].dropna().unique())
     selected_sigungu = st.selectbox("2. 시·군·구 선택", sigungu_list)
 
 with col3:
-    # 3) 선택된 시군구에 해당하는 동 목록 필터링
     df_sigungu = df_sido[df_sido["시군구"] == selected_sigungu]
     dong_list = sorted(df_sigungu["동"].dropna().unique())
     selected_dong = st.selectbox("3. 읍·면·동 선택", dong_list)
@@ -65,45 +62,93 @@ selected_row = df_sigungu[df_sigungu["동"] == selected_dong].iloc[0]
 
 
 # -----------------------------------------------------------------------------
-# 4. 연령대 라벨 및 남/여 인구 데이터 추출
+# 4. 연령대 라벨 및 인구 통계 지표 계산
 # -----------------------------------------------------------------------------
-# '0세'부터 '99세'까지 그리고 '100세 이상' 라벨 목록을 정순(0세 -> 100세 이상)으로 만듭니다.
+# '0세'부터 '99세'까지 그리고 '100세 이상' 라벨 목록
 age_labels = [f"{i}세" for i in range(100)] + ["100세 이상"]
+ages_numeric = np.array(list(range(100)) + [100])  # 가중평균 계산용 수치 배열
 
-# 열 이름 형식('남_0세', '여_0세' ...)에 맞춰 열 이름 생성
 male_cols = [f"남_{age}" for age in age_labels]
 female_cols = [f"여_{age}" for age in age_labels]
 
-# 남성 인구수는 피라미드 왼쪽에 배치하기 위해 음수로 변환 (-1 곱함)
-male_counts = [-int(selected_row[col]) for col in male_cols]
-# 여성 인구수는 피라미드 오른쪽에 배치하기 위해 양수 유지
-female_counts = [int(selected_row[col]) for col in female_cols]
+# 남성/여성/연령별 합계 계산
+male_counts = np.array([int(selected_row[col]) for col in male_cols])
+female_counts = np.array([int(selected_row[col]) for col in female_cols])
+total_by_age = male_counts + female_counts
+
+# 1) 총인구
+total_population = int(total_by_age.sum())
+
+if total_population > 0:
+    # 2) 평균연령 (연령 수치 x 해당 연령 인구수의 가중평균)
+    avg_age = (ages_numeric * total_population_by_age := total_by_age).sum() / total_population
+
+    # 3) 고령화율 (65세 이상 비율)
+    elderly_pop = total_by_age[65:].sum()
+    elderly_ratio = (elderly_pop / total_population) * 100
+
+    # 4) 유소년 비율 (0세 ~ 14세 비율)
+    child_pop = total_by_age[:15].sum()
+    child_ratio = (child_pop / total_population) * 100
+else:
+    avg_age = 0.0
+    elderly_ratio = 0.0
+    child_ratio = 0.0
 
 
 # -----------------------------------------------------------------------------
-# 5. Plotly 가로 막대그래프(인구 피라미드) 생성
+# 5. 그래프 위 주요 지표 카드 3개 표기
+# -----------------------------------------------------------------------------
+st.markdown("---")
+m_col1, m_col2, m_col3 = st.columns(3)
+
+with m_col1:
+    st.metric(label="👥 총인구", value=f"{total_population:,} 명")
+
+with m_col2:
+    st.metric(label="🎂 평균연령", value=f"{avg_age:.1f} 세")
+
+with m_col3:
+    # 고령화율 20% 초과 시 주의 경고 표시 붙임 (초고령사회 기준)
+    elderly_label = "👵 고령화율 (65세 이상)"
+    if elderly_ratio >= 20.0:
+        st.metric(
+            label=f"{elderly_label} ⚠️ [초고령]",
+            value=f"{elderly_ratio:.1f} %",
+            delta="20% 초과 (주의)",
+            delta_color="inverse",
+        )
+    else:
+        st.metric(label=elderly_label, value=f"{elderly_ratio:.1f} %")
+
+st.markdown("---")
+
+
+# -----------------------------------------------------------------------------
+# 6. Plotly 가로 막대그래프(인구 피라미드) 생성
 # -----------------------------------------------------------------------------
 fig = go.Figure()
 
-# 따뜻한 톤 색상 설정
-COLOR_MALE = "#E07A5F"  # 따뜻한 테라코타/주황
-COLOR_FEMALE = "#F28482"  # 따뜻한 코랄/로즈 핑크
+# 차트용 남성 인구수는 음수 변환 (-1 곱함)
+male_counts_plot = [-val for val in male_counts]
 
-# [남성 막대 그래프] - 왼쪽 (음수값)
+COLOR_MALE = "#E07A5F"   # 따뜻한 테라코타/주황
+COLOR_FEMALE = "#F28482" # 따뜻한 코랄/로즈 핑크
+
+# [남성 막대 그래프] - 왼쪽 (음수)
 fig.add_trace(
     go.Bar(
         y=age_labels,
-        x=male_counts,
+        x=male_counts_plot,
         name="남자",
         orientation="h",
         marker=dict(color=COLOR_MALE),
-        # 마우스 호버 시 절댓값을 취해 양수로 표시
         hovertemplate="<b>%{y}</b> (남성): %{customdata:,}명<extra></extra>",
-        customdata=[-val for val in male_counts],
+        customdata=male_counts,
     )
 )
 
-# [여성 막대 그래프] - 오른쪽 (양수값)
+# [여성 막대 그래프] - 오른쪽 (양수)
 fig.add_trace(
     go.Bar(
         y=age_labels,
@@ -115,12 +160,8 @@ fig.add_trace(
     )
 )
 
-
-# -----------------------------------------------------------------------------
-# 6. 세로축 순서 고정 및 레이아웃 설정
-# -----------------------------------------------------------------------------
-# x축 범위 대칭 설정을 위한 최대 인구수 계산
-max_val = max(max([-x for x in male_counts]), max(female_counts))
+# 좌우 대칭 범주용 최대값 계산
+max_val = max(male_counts.max(), female_counts.max()) if total_population > 0 else 100
 if max_val == 0:
     max_val = 100
 
@@ -133,7 +174,7 @@ fig.update_layout(
     ),
     barmode="overlay",
     bargap=0.1,
-    paper_bgcolor="#FAF8F5",  # 따뜻한 배경색
+    paper_bgcolor="#FAF8F5",
     plot_bgcolor="#FAF8F5",
     legend=dict(
         orientation="h",
@@ -143,11 +184,10 @@ fig.update_layout(
         x=1,
         font=dict(size=13),
     ),
-    height=900,  # 0~100세 이상까지 명확히 표기되는 가독성 좋은 높이
+    height=900,
     margin=dict(l=60, r=40, t=100, b=50),
 )
 
-# X축 (인구수): 음수 눈금 라벨을 양수로 시각화
 fig.update_xaxes(
     title_text="인구수 (명)",
     gridcolor="#E0E0E0",
@@ -168,17 +208,39 @@ fig.update_xaxes(
     ],
 )
 
-# Y축 (나이) 순서 지정:
-# autorange="reversed"나 값 기준 정렬을 일절 사용하지 않고,
-# categoryarray에 0세부터 100세 이상까지 순서대로 전달하여 맨 아래가 0세, 맨 위가 100세 이상이 되도록 고정합니다.
+# 세로축(나이) 순서 고정 (0세가 맨 아래, 100세 이상이 맨 위)
 fig.update_yaxes(
     title_text="연령 (나이)",
     type="category",
     categoryorder="array",
-    categoryarray=age_labels,  # ['0세', '1세', ..., '100세 이상'] 정순 배치
+    categoryarray=age_labels,
     gridcolor="#E0E0E0",
-    dtick=5,  # 눈금 라벨 5세 간격 표시
+    dtick=5,
 )
 
-# Streamlit 화면에 출력
+# 그래프 화면 출력
 st.plotly_chart(fig, use_container_width=True)
+
+
+# -----------------------------------------------------------------------------
+# 7. 피라미드 하단 자동 분석 한 줄 설명
+# -----------------------------------------------------------------------------
+st.subheader("💡 동네 인구 특성 한 줄 분석")
+
+if total_population == 0:
+    st.info("해당 지역의 인구 데이터가 존재하지 않습니다.")
+elif child_ratio > elderly_ratio:
+    st.info(
+        f"🎈 **이 동네는 아이(유소년)가 상대적으로 많은 편입니다!** "
+        f"(14세 이하 어린이 비율: **{child_ratio:.1f}%** / 65세 이상 어르신 비율: **{elderly_ratio:.1f}%**)"
+    )
+elif elderly_ratio > child_ratio:
+    st.warning(
+        f"🍵 **이 동네는 어르신(고령층)이 상대적으로 많은 편입니다.** "
+        f"(65세 이상 어르신 비율: **{elderly_ratio:.1f}%** / 14세 이하 어린이 비율: **{child_ratio:.1f}%**)"
+    )
+else:
+    st.info(
+        f"⚖️ **이 동네는 아이와 어르신의 비율이 비슷하게 균형을 이루고 있습니다.** "
+        f"(어린이: **{child_ratio:.1f}%** / 어르신: **{elderly_ratio:.1f}%**)"
+    )
