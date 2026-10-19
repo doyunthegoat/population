@@ -1,6 +1,6 @@
 import json
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 
@@ -39,22 +39,15 @@ def load_data():
     # '계_'로 시작하는 전체 나이 열 찾기
     total_cols = [c for c in df_2026.columns if c.startswith("계_")]
 
-    # '계_65세'부터 '계_100세 이상'까지의 열 정순 추출
+    # '계_65세'부터 '계_100세 이상'까지의 열 추출
     age_labels = [f"계_{i}세" for i in range(65, 100)] + ["계_100세 이상"]
     elderly_cols = [c for c in age_labels if c in df_2026.columns]
 
-    # 시군구(코드 5자리) 단위로 그룹화하여 인구 합계 계산
-    grouped = df_2026.groupby("코드5자리", as_index=False).agg(
-        total_pop=(
-            total_cols[0],
-            lambda x: df_2026.loc[x.index, total_cols].sum(axis=1).sum(),
-        )
-    )
-
-    # 65세 이상 및 전체 인구 합산 계산
+    # 65세 이상 및 전체 인구 계산
     df_2026["전체인구"] = df_2026[total_cols].sum(axis=1)
     df_2026["고령인구"] = df_2026[elderly_cols].sum(axis=1)
 
+    # 시군구(코드 5자리) 단위로 그룹화하여 합산
     df_sigungu = (
         df_2026.groupby("코드5자리", as_index=False)[
             ["전체인구", "고령인구"]
@@ -89,6 +82,7 @@ def load_data():
 with st.spinner("2026년 인구 데이터 및 시군구 지도를 로딩하는 중입니다..."):
     df_sigungu, geojson_data = load_data()
 
+
 # -----------------------------------------------------------------------------
 # 3. 주요 통계 카드 표기
 # -----------------------------------------------------------------------------
@@ -96,10 +90,10 @@ c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.metric("총 분석 시군구", f"{len(df_sigungu)} 개")
 with c2:
-    st.metric(
-        "전국 평균 고령화율",
-        f"{(df_sigungu['고령인구'].sum() / df_sigungu['전체인구'].sum() * 100):.1f} %",
-    )
+    total_nation_pop = df_sigungu["전체인구"].sum()
+    total_nation_elderly = df_sigungu["고령인구"].sum()
+    nation_ratio = (total_nation_elderly / total_nation_pop * 100) if total_nation_pop > 0 else 0
+    st.metric("전국 평균 고령화율", f"{nation_ratio:.1f} %")
 with c3:
     max_row = df_sigungu.loc[df_sigungu["고령화율"].idxmax()]
     st.metric(
@@ -117,43 +111,10 @@ with c4:
 
 st.markdown("---")
 
+
 # -----------------------------------------------------------------------------
-# 4. Plotly 단계구분도 (Choropleth) 지도 생성
+# 4. Plotly 단계구분도 (Choroplethmapbox) 지각화
 # -----------------------------------------------------------------------------
-# 지도 중심 및 확대율 기본값 설정
-fig = px.choropleth_mapbox(
-    df_sigungu,
-    geojson=geojson_data,
-    locations="코드5자리",  # 데이터 프레임의 연결 열
-    featureidkey="properties.코드",  # GeoJSON 매핑 열 ('코드')
-    color="고령화율",
-    color_continuous_scale="Reds",  # 고령화율이 높을수록 진한 빨간색
-    range_color=(
-        df_sigungu["고령화율"].min(),
-        df_sigungu["고령화율"].max(),
-    ),
-    mapbox_style="white-bg",  # 지도 타일(배경) 없이 경계만 표시
-    center={"lat": 36.0, "lon": 127.8},  # 대한민국 중심점 좌표
-    zoom=6.2,
-    hover_name="시군구명",
-    hover_data={"코드5자리": True, "고령화율": ":.2f%", "전체인구": ":,명"},
-    labels={"고령화율": "고령화율 (%)", "코드5자리": "지역코드"},
-)
-
-# 호버 서식 및 레이아웃 커스텀
-fig.update_traces(
-    hovertemplate="<b>%{hovertext}</b><br>코드: %{location}<br>고령화율: <b>%{z:.2f}%</b><extra></extra>"
-)
-
-fig.update_layout(
-    margin={"r": 0, "t": 30, "l": 0, "b": 0},
-    height=750,
-    coloraxis_colorbar=dict(
-        title="고령화율 (%)",
-        ticksuffix="%",
-        thickness=20,
-        len=0.75,
-    ),
-)
-
-st.plotly_chart(fig, use_container_width=True)
+fig = go.Figure(
+    go.Choroplethmapbox(
+        geojson=geojson_data,
