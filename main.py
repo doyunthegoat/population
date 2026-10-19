@@ -161,9 +161,90 @@ fig.add_trace(
 )
 
 # 좌우 대칭 범주용 최대값 계산
-max_val = max(male_counts.max(), female_counts.max()) if total_population > 0 else 100
+if total_population > 0:
+    max_val = max(int(male_counts.max()), int(female_counts.max()))
+else:
+    max_val = 100
+
 if max_val == 0:
     max_val = 100
 
 fig.update_layout(
     title=dict(
+        text=f"<b>{selected_sido} {selected_sigungu} {selected_dong}</b> 인구 피라미드 ({latest_year}년)",
+        font=dict(size=20, color="#3D405B"),
+        x=0.5,
+        xanchor="center",
+    ),
+    barmode="overlay",
+    bargap=0.1,
+    paper_bgcolor="#FAF8F5",
+    plot_bgcolor="#FAF8F5",
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="right",
+        x=1,
+        font=dict(size=13),
+    ),
+    height=900,
+    margin=dict(l=60, r=40, t=100, b=50),
+)
+
+fig.update_xaxes(
+    title_text="인구수 (명)",
+    gridcolor="#E0E0E0",
+    range=[-max_val * 1.1, max_val * 1.1],
+    tickvals=[
+        -int(max_val),
+        -int(max_val / 2),
+        0,
+        int(max_val / 2),
+        int(max_val),
+    ],
+    ticktext=[
+        f"{int(max_val):,}",
+        f"{int(max_val/2):,}",
+        "0",
+        f"{int(max_val/2):,}",
+        f"{int(max_val):,}",
+    ],
+)
+
+# 세로축(나이) 순서 고정 (0세가 맨 아래, 100세 이상이 맨 위)
+fig.update_yaxes(
+    title_text="연령 (나이)",
+    type="category",
+    categoryorder="array",
+    categoryarray=age_labels,
+    gridcolor="#E0E0E0",
+    dtick=5,
+)
+
+# 그래프 화면 출력
+st.plotly_chart(fig, use_container_width=True)
+
+
+# -----------------------------------------------------------------------------
+# 7. 피라미드 하단 자동 분석 한 줄 설명
+# -----------------------------------------------------------------------------
+st.subheader("💡 동네 인구 특성 한 줄 분석")
+
+if total_population == 0:
+    st.info("해당 지역의 인구 데이터가 존재하지 않습니다.")
+elif child_ratio > elderly_ratio:
+    st.info(
+        f"🎈 **이 동네는 아이(유소년)가 상대적으로 많은 편입니다!** "
+        f"(14세 이하 어린이 비율: **{child_ratio:.1f}%** / 65세 이상 어르신 비율: **{elderly_ratio:.1f}%**)"
+    )
+elif elderly_ratio > child_ratio:
+    st.warning(
+        f"🍵 **이 동네는 어르신(고령층)이 상대적으로 많은 편입니다.** "
+        f"(65세 이상 어르신 비율: **{elderly_ratio:.1f}%** / 14세 이하 어린이 비율: **{child_ratio:.1f}%**)"
+    )
+else:
+    st.info(
+        f"⚖️ **이 동네는 아이와 어르신의 비율이 비슷하게 균형을 이루고 있습니다.** "
+        f"(어린이: **{child_ratio:.1f}%** / 어르신: **{elderly_ratio:.1f}%**)"
+    )
