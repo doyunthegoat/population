@@ -92,7 +92,11 @@ with c1:
 with c2:
     total_nation_pop = df_sigungu["전체인구"].sum()
     total_nation_elderly = df_sigungu["고령인구"].sum()
-    nation_ratio = (total_nation_elderly / total_nation_pop * 100) if total_nation_pop > 0 else 0
+    nation_ratio = (
+        (total_nation_elderly / total_nation_pop * 100)
+        if total_nation_pop > 0
+        else 0
+    )
     st.metric("전국 평균 고령화율", f"{nation_ratio:.1f} %")
 with c3:
     max_row = df_sigungu.loc[df_sigungu["고령화율"].idxmax()]
@@ -113,8 +117,32 @@ st.markdown("---")
 
 
 # -----------------------------------------------------------------------------
-# 4. Plotly 단계구분도 (Choroplethmapbox) 지각화
+# 4. Plotly 표준 단계구분도 (Choropleth) 시각화
 # -----------------------------------------------------------------------------
 fig = go.Figure(
-    go.Choroplethmapbox(
+    go.Choropleth(
         geojson=geojson_data,
+        locations=df_sigungu["코드5자리"],
+        featureidkey="properties.코드",
+        z=df_sigungu["고령화율"],
+        colorscale="Reds",
+        colorbar_title="고령화율 (%)",
+        text=df_sigungu["시군구명"],
+        customdata=df_sigungu["전체인구"],
+        hovertemplate="<b>%{text}</b><br>코드: %{location}<br>고령화율: <b>%{z:.2f}%</b><br>전체인구: %{customdata:,}명<extra></extra>",
+        marker_line_width=0.8,
+        marker_line_color="#666666",
+    )
+)
+
+fig.update_geos(
+    fitbounds="locations",  # 대한민국 영역으로 지도를 자동으로 확대 맞춤
+    visible=False,  # 외부 지도의 위도/경도선 및 기본 배경 제거
+)
+
+fig.update_layout(
+    margin={"r": 0, "t": 30, "l": 0, "b": 0},
+    height=750,
+)
+
+st.plotly_chart(fig, use_container_width=True)
